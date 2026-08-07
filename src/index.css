@@ -1,0 +1,114 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #0F4C81;
+  --color-primary-hover: #0a365c;
+  --color-secondary: #2ECC71;
+  --color-secondary-hover: #27ae60;
+  --color-danger: #E74C3C;
+  --color-danger-hover: #c0392b;
+  --color-warning: #F39C12;
+  --color-warning-hover: #d35400;
+  --color-accent-base: #F5F7FA;
+}
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-800 antialiased transition-colors duration-300;
+    font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
+  }
+  
+  body.dark {
+    @apply bg-[#0b0f19] text-slate-100;
+  }
+  
+  /* Disable layout restriction inside root since it was a standard Vite wrapper, we'll construct our own gorgeous grid */
+  #root {
+    width: 100%;
+    max-width: 100vw;
+    margin: 0;
+    text-align: left;
+    border-inline: none;
+    min-height: 100vh;
+    display: block;
+  }
+}
+
+/* Glassmorphism styling */
+.glass {
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.dark .glass {
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.glass-solid {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+.dark .glass-solid {
+  background: rgba(20, 28, 47, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-300 dark:bg-slate-800 rounded-full hover:bg-slate-400 dark:hover:bg-slate-700;
+}
+
+/* Glowing effects */
+.glow-primary {
+  box-shadow: 0 0 50px -10px rgba(15, 76, 129, 0.25);
+}
+.glow-secondary {
+  box-shadow: 0 0 50px -10px rgba(46, 204, 113, 0.25);
+}
+
+.dark .glow-primary {
+  box-shadow: 0 0 50px -10px rgba(15, 76, 129, 0.4);
+}
+.dark .glow-secondary {
+  box-shadow: 0 0 50px -10px rgba(46, 204, 113, 0.4);
+}
+
+/* Custom visual components */
+.ticket-edge {
+  background-image: radial-gradient(circle at 0% 50%, transparent 8px, white 9px);
+  background-size: 100% 20px;
+}
+
+/* Custom keyframes */
+@keyframes float {
+  0% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-10px) rotate(2deg); }
+  100% { transform: translateY(0px) rotate(0deg); }
+}
+
+.animate-float-slow {
+  animation: float 6s ease-in-out infinite;
+}
+.animate-float-medium {
+  animation: float 4s ease-in-out infinite;
+}
+.animate-float-fast {
+  animation: float 3s ease-in-out infinite;
+}
