@@ -20,6 +20,8 @@ import {
 } from 'lucide-react';
 import { OledPreview } from './OledPreview';
 import QRCode from 'react-qr-code';
+import { QrGateScanner } from './QrGateScanner';
+import { playGateOpenSound } from '../utils/scannerAudio';
 
 export const AdminDashboard: React.FC = () => {
   const { 
@@ -54,6 +56,7 @@ export const AdminDashboard: React.FC = () => {
 
   // ── GATE SCANNER TERMINAL STATES ──────────────────────────────────────────────
   const [scanQuery, setScanQuery] = useState('');
+  const [qrScannerOpen, setQrScannerOpen] = useState(false);
   const [scanInModalOpen, setScanInModalOpen] = useState(false);
   const [scanOutModalOpen, setScanOutModalOpen] = useState(false);
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
@@ -268,6 +271,70 @@ export const AdminDashboard: React.FC = () => {
     setReceiptModalOpen(true);
   };
 
+  // ── Handle QR Scanner result: parse payload → Gate IN or Gate OUT ──────────────
+  const handleQrScan = (rawData: string) => {
+    let parsed: Record<string, string | number | boolean> | null = null;
+
+    // Try JSON parse first (structured ParkEase ticket QR)
+    try {
+      parsed = JSON.parse(rawData);
+    } catch {
+      parsed = null;
+    }
+
+    // ── CASE 1: Structured ParkEase QR payload ─────────────────────────────────
+    if (parsed && parsed.parkEasePass) {
+      const vehicleNo = String(parsed.vehicleNo || '').toUpperCase();
+      const bookingId = String(parsed.bookingId || '');
+      const slotId = String(parsed.slotId || '');
+      const area = String(parsed.area || activeArea);
+
+      // Check if the vehicle is already PARKED → Gate OUT
+      let parkedSlot: Slot | null = null;
+      let parkedArea = area;
+
+      Object.entries(slots).forEach(([areaName, slotList]) => {
+        const match = slotList.find(
+          (s) => s.status === 'occupied' && s.vehicleNo?.toUpperCase() === vehicleNo
+        );
+        if (match) {
+          parkedSlot = match;
+          parkedArea = areaName;
+        }
+      });
+
+      if (parkedSlot) {
+        // Vehicle is inside → trigger Gate OUT
+        playGateOpenSound();
+        openScanOutForSlot(parkedArea, parkedSlot);
+        return;
+      }
+
+      // Vehicle is NOT inside yet → trigger Gate IN
+      // Pre-fill entry form from QR payload
+      const availArea = slots[area] ? area : activeArea;
+      const availSlots = slots[availArea]?.filter((s) => s.status === 'available' || s.id === slotId) || [];
+      const targetSlotId = slotId || availSlots[0]?.id || 'A1';
+
+      setEntryArea(availArea);
+      setEntrySlotId(targetSlotId);
+      setEntryVehicleNo(vehicleNo);
+      setEntryVehicleModel(String(parsed.vehicleModel || 'Car'));
+      setEntryVehicleType(String(parsed.vehicleType || 'Car'));
+      setEntryOwnerName(String(parsed.name || 'Walk-in Driver'));
+      setEntryOwnerPhone(String(parsed.phone || '9876543210'));
+      setEntryBookingId(bookingId);
+      setEntryTimeInput(new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16));
+
+      playGateOpenSound();
+      setScanInModalOpen(true);
+      return;
+    }
+
+    // ── CASE 2: Plain text search — booking ID, reservation ID, or plate number ──
+    handleScanSearch(rawData.trim());
+  };
+
   // Handle Quick Search in Scanner Field
   const handleScanSearch = (val: string) => {
     setScanQuery(val);
@@ -386,21 +453,34 @@ export const AdminDashboard: React.FC = () => {
             <div className="flex items-center gap-2">
               <QrCode className="h-6 w-6 text-primary animate-pulse" />
               <h2 className="text-xl font-black text-slate-900 dark:text-white">
-                Interactive Gate In / Out Scanner & Automated Fare Terminal
+                Smart Gate In / Out QR Scanner Terminal
               </h2>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Scan QR code, enter Vehicle Plate Number, or use quick action controls to calculate parking duration and fares.
+              Scan the user's booking QR code at entry to start the parking clock, or at exit to automatically calculate and bill the fare.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
-            {/* Rapid Scan / Search Bar */}
-            <div className="relative flex-grow lg:w-72">
+
+            {/* ── PRIMARY: Open Real QR Scanner ──────────────────────────────── */}
+            <button
+              onClick={() => setQrScannerOpen(true)}
+              className="flex items-center gap-2 bg-gradient-to-r from-primary to-blue-500 hover:from-primary-hover hover:to-blue-600 text-white px-6 py-3 rounded-full text-sm font-black shadow-lg cursor-pointer transition-all hover:scale-105 glow-primary"
+            >
+              <QrCode className="h-5 w-5" />
+              Open QR Scanner
+            </button>
+
+            {/* Divider */}
+            <span className="text-xs text-slate-400 font-semibold hidden lg:block">or</span>
+
+            {/* Manual Search fallback */}
+            <div className="relative flex-grow lg:w-56">
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <input
                 type="text"
-                placeholder="Scan QR or enter Plate / Booking ID..."
+                placeholder="Manual: Plate / Booking ID..."
                 value={scanQuery}
                 onChange={(e) => handleScanSearch(e.target.value)}
                 className="w-full pl-9 pr-4 py-2.5 text-xs rounded-full border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none focus:border-primary shadow-inner"
@@ -422,9 +502,9 @@ export const AdminDashboard: React.FC = () => {
                 setEntryTimeInput(new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16));
                 setScanInModalOpen(true);
               }}
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-full text-xs font-bold shadow cursor-pointer transition-transform hover:scale-102"
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-full text-xs font-bold shadow cursor-pointer transition-transform hover:scale-102"
             >
-              <LogIn className="h-4 w-4" /> Vehicle IN (Check-In)
+              <LogIn className="h-4 w-4" /> Walk-in IN
             </button>
 
             {/* Gate OUT Action Button */}
@@ -437,9 +517,9 @@ export const AdminDashboard: React.FC = () => {
                   alert('No occupied vehicles currently found in ' + activeArea);
                 }
               }}
-              className="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white px-5 py-2.5 rounded-full text-xs font-bold shadow cursor-pointer transition-transform hover:scale-102"
+              className="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white px-4 py-2.5 rounded-full text-xs font-bold shadow cursor-pointer transition-transform hover:scale-102"
             >
-              <LogOut className="h-4 w-4" /> Vehicle OUT & Bill (Check-Out)
+              <LogOut className="h-4 w-4" /> Walk-in OUT
             </button>
           </div>
         </div>
@@ -1059,6 +1139,50 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </form>
       </div>
+
+      {/* ── QR GATE SCANNER MODAL (Camera / File / Demo / Manual) ─────────────────── */}
+      <QrGateScanner
+        isOpen={qrScannerOpen}
+        onClose={() => setQrScannerOpen(false)}
+        onScan={handleQrScan}
+        activeArea={activeArea}
+        pendingCheckIns={bookings
+          .filter((b) => b.status === 'Confirmed')
+          .map((b) => ({
+            bookingId: b.bookingId,
+            vehicleNo: b.vehicleNo,
+            vehicleModel: b.vehicleModel,
+            vehicleType: b.vehicleType,
+            slotId: b.slotId,
+            area: b.area,
+            name: b.name,
+            phone: b.phone,
+            date: b.date,
+            time: b.time,
+            deposit: b.deposit,
+          }))}
+        activeParkedVehicles={Object.entries(slots).flatMap(([areaName, slotList]) =>
+          slotList
+            .filter((s) => s.status === 'occupied')
+            .map((s) => {
+              const activeLog = parkingLogs.find(
+                (l) => l.status === 'PARKED' && l.slotId === s.id && l.area === areaName
+              );
+              return {
+                slotId: s.id,
+                vehicleNo: s.vehicleNo || '',
+                vehicleModel: s.vehicleModel,
+                vehicleType: s.vehicleType,
+                area: areaName,
+                ownerName: s.ownerName,
+                ownerPhone: s.ownerPhone,
+                entryTime: activeLog?.entryTime || s.occupancyTime || new Date(Date.now() - 45 * 60000).toISOString(),
+                logId: activeLog?.logId,
+                depositPaid: activeLog?.depositPaid,
+              };
+            })
+        )}
+      />
 
       {/* ── MODAL 1: CHECK-IN VEHICLE (GATE IN) ─────────────────────────────────── */}
       {scanInModalOpen && (
