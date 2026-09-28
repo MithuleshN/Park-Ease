@@ -15,7 +15,9 @@ import {
   Printer, 
   Download, 
   Sparkles,
-  Ticket
+  Ticket,
+  Copy,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import QRCode from 'react-qr-code';
@@ -55,6 +57,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
 
   // Confirmed ticket state
   const [confirmedBooking, setConfirmedBooking] = useState<any>(null);
+  const [copiedQr, setCopiedQr] = useState(false);
 
   // Form Validation errors
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -132,6 +135,12 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
     setPaymentSuccess(true);
     setConfirmedBooking(ticket);
 
+    try {
+      localStorage.setItem('parkease_active_ticket', JSON.stringify(ticket));
+    } catch {
+      // localStorage may fail in private mode
+    }
+
     setTimeout(() => setStep(6), 1000);
   };
 
@@ -149,6 +158,53 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
     link.download = `ticket-${confirmedBooking.bookingId}.json`;
     link.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadQrImage = () => {
+    if (!confirmedBooking) return;
+    const svg = document.querySelector('#printable-ticket svg') as SVGGraphicsElement | null;
+    if (!svg) return;
+    const svgData = new XMLSerializer().serializeToString(svg);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    img.onload = () => {
+      canvas.width = 300;
+      canvas.height = 300;
+      if (ctx) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, 300, 300);
+        ctx.drawImage(img, 25, 25, 250, 250);
+        const pngFile = canvas.toDataURL('image/png');
+        const downloadLink = document.createElement('a');
+        downloadLink.download = `ticket-QR-${confirmedBooking.bookingId}.png`;
+        downloadLink.href = pngFile;
+        downloadLink.click();
+      }
+    };
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+  };
+
+  const handleCopyQrData = () => {
+    if (!confirmedBooking) return;
+    const payload = JSON.stringify({
+      parkEasePass: true,
+      bookingId: confirmedBooking.bookingId,
+      reservationId: confirmedBooking.reservationId || confirmedBooking.bookingId,
+      vehicleNo: confirmedBooking.vehicleNo,
+      vehicleModel: confirmedBooking.vehicleModel,
+      vehicleType: confirmedBooking.vehicleType,
+      name: confirmedBooking.name,
+      phone: confirmedBooking.phone,
+      area: confirmedBooking.area,
+      slotId: confirmedBooking.slotId,
+      date: confirmedBooking.date,
+      time: confirmedBooking.time,
+      deposit: confirmedBooking.deposit
+    }, null, 2);
+    navigator.clipboard.writeText(payload);
+    setCopiedQr(true);
+    setTimeout(() => setCopiedQr(false), 2500);
   };
 
   const resetWizardState = () => {
@@ -734,18 +790,40 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                   </div>
 
                   {/* QR rendering container */}
-                  <div className="p-4 bg-white dark:bg-white rounded-2xl w-fit mx-auto border border-slate-200 shadow-sm mb-6 flex justify-center items-center">
+                  <div className="p-4 bg-white dark:bg-white rounded-2xl w-fit mx-auto border border-slate-200 shadow-sm mb-4 flex flex-col justify-center items-center">
                     <QRCode
                       value={JSON.stringify({
+                        parkEasePass: true,
                         bookingId: confirmedBooking.bookingId,
+                        reservationId: confirmedBooking.reservationId || confirmedBooking.bookingId,
                         vehicleNo: confirmedBooking.vehicleNo,
-                        slotId: confirmedBooking.slotId,
+                        vehicleModel: confirmedBooking.vehicleModel,
+                        vehicleType: confirmedBooking.vehicleType,
+                        name: confirmedBooking.name,
+                        phone: confirmedBooking.phone,
                         area: confirmedBooking.area,
+                        slotId: confirmedBooking.slotId,
                         date: confirmedBooking.date,
-                        time: confirmedBooking.time
+                        time: confirmedBooking.time,
+                        deposit: confirmedBooking.deposit
                       })}
-                      size={150}
+                      size={160}
                     />
+                    <span className="text-[10px] font-bold text-slate-400 uppercase mt-2">
+                      Scan at Entrance & Exit Kiosk
+                    </span>
+                  </div>
+
+                  {/* Smart Gate instructions alert */}
+                  <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-xs text-emerald-800 dark:text-emerald-300 flex items-start gap-2.5 text-left mb-4">
+                    <CheckCircle2 className="h-4.5 w-4.5 text-emerald-500 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-extrabold text-[12px]">Smart Gate Instructions:</p>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5 leading-relaxed">
+                        • <strong>Gate In:</strong> Show this QR to the entrance scanner to start your live parking timestamp and open the barrier gate.<br />
+                        • <strong>Gate Out:</strong> Scan this same QR at the exit to automatically calculate parking duration and bill your final fare.
+                      </p>
+                    </div>
                   </div>
 
                   {/* Meta fields */}
@@ -766,23 +844,36 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
 
                 </div>
 
-                {/* Print/Download Button Group */}
-                <div className="flex flex-wrap gap-3 justify-center pt-4">
+                {/* Print/Download/Copy Button Group */}
+                <div className="flex flex-wrap gap-2.5 justify-center pt-4">
+                  <button
+                    onClick={handleDownloadQrImage}
+                    className="flex items-center gap-1.5 bg-primary/10 hover:bg-primary/20 text-primary dark:text-blue-400 px-4 py-2.5 rounded-full font-bold cursor-pointer text-xs transition"
+                  >
+                    <Download className="h-4 w-4" /> Download QR Image
+                  </button>
+                  <button
+                    onClick={handleCopyQrData}
+                    className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 px-4 py-2.5 rounded-full font-bold cursor-pointer text-xs transition"
+                  >
+                    {copiedQr ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+                    {copiedQr ? 'QR Payload Copied!' : 'Copy QR Data'}
+                  </button>
                   <button
                     onClick={handleDownloadTicket}
-                    className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 px-5 py-2.5 rounded-full font-bold cursor-pointer text-xs"
+                    className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 px-4 py-2.5 rounded-full font-bold cursor-pointer text-xs"
                   >
-                    <Download className="h-4.5 w-4.5" /> Download Ticket
+                    <Download className="h-4 w-4" /> JSON Ticket
                   </button>
                   <button
                     onClick={handlePrint}
-                    className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 px-5 py-2.5 rounded-full font-bold cursor-pointer text-xs"
+                    className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 px-4 py-2.5 rounded-full font-bold cursor-pointer text-xs"
                   >
-                    <Printer className="h-4.5 w-4.5" /> Print Ticket
+                    <Printer className="h-4 w-4" /> Print Ticket
                   </button>
                   <button
                     onClick={resetWizardState}
-                    className="flex items-center gap-1.5 bg-primary hover:bg-primary-hover text-white px-7 py-3 rounded-full font-bold cursor-pointer text-xs glow-primary"
+                    className="flex items-center gap-1.5 bg-primary hover:bg-primary-hover text-white px-6 py-2.5 rounded-full font-bold cursor-pointer text-xs glow-primary"
                   >
                     Book Another Slot
                   </button>
