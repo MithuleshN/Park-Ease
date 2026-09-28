@@ -39,6 +39,44 @@ export interface Reservation {
   createdAt: string;
 }
 
+export interface ParkingLog {
+  logId: string;
+  bookingId?: string;
+  area: string;
+  slotId: string;
+  vehicleNo: string;
+  vehicleModel?: string;
+  vehicleType?: string;
+  ownerName?: string;
+  ownerPhone?: string;
+  entryTime: string; // ISO string or timestamp
+  exitTime?: string; // ISO string or timestamp
+  durationMinutes?: number;
+  hourlyRate: number;
+  depositPaid: number;
+  baseFare?: number;
+  peakSurcharge?: number;
+  totalFare?: number;
+  amountDue?: number;
+  status: 'PARKED' | 'OUT_COMPLETED';
+  createdAt: string;
+}
+
+export interface FareDetails {
+  durationMinutes: number;
+  durationFormatted: string;
+  chargedHours: number;
+  hourlyRate: number;
+  vehicleType: string;
+  vehicleMultiplier: number;
+  baseFare: number;
+  isPeak: boolean;
+  peakSurcharge: number;
+  totalFare: number;
+  depositPaid: number;
+  amountDue: number;
+}
+
 export interface ParkingSettings {
   peakHoursStart: string;
   peakHoursEnd: string;
@@ -52,6 +90,7 @@ export interface ParkingSettings {
 interface ParkingContextType {
   slots: Record<string, Slot[]>;
   bookings: Reservation[];
+  parkingLogs: ParkingLog[];
   settings: ParkingSettings;
   activeArea: string;
   loading: boolean;
@@ -61,6 +100,30 @@ interface ParkingContextType {
   updateSlotStatus: (area: string, slotId: string, status: SlotStatus, extra?: Partial<Slot>) => void;
   updateSettings: (newSettings: Partial<ParkingSettings>) => void;
   isPeakHour: (timeStr: string) => boolean;
+  processVehicleEntry: (data: {
+    area: string;
+    slotId: string;
+    vehicleNo: string;
+    vehicleModel?: string;
+    vehicleType?: string;
+    ownerName?: string;
+    ownerPhone?: string;
+    bookingId?: string;
+    entryTime?: string;
+  }) => Promise<ParkingLog>;
+  processVehicleExit: (
+    logIdOrSlotId: string,
+    area?: string,
+    exitTimeStr?: string
+  ) => Promise<{ log: ParkingLog; fareDetails: FareDetails }>;
+  calculateFareDetails: (
+    entryTimeStr: string,
+    exitTimeStr?: string,
+    overrideHourlyRate?: number,
+    vehicleType?: string,
+    depositPaid?: number,
+    area?: string
+  ) => FareDetails;
 }
 
 const ParkingContext = createContext<ParkingContextType | undefined>(undefined);
@@ -372,11 +435,256 @@ export const ParkingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return () => clearInterval(interval);
   }, [settings.isSimulating, slots]);
 
+  const [parkingLogs, setParkingLogs] = useState<ParkingLog[]>([]);
+
+  // ── Real-time listener: parkingLogs ─────────────────────────────────────────
+  useEffect(() => {
+    const unsub = onValue(ref(db, 'parkingLogs'), (snap) => {
+      if (!snap.exists()) {
+        setParkingLogs([]);
+        return;
+      }
+      const raw = snap.val() as Record<string, ParkingLog>;
+      const list = Object.values(raw).sort(
+        (a, b) => new Date(b.createdAt || b.entryTime).getTime() - new Date(a.createdAt || a.entryTime).getTime()
+      );
+      setParkingLogs(list);
+    });
+    return () => unsub();
+  }, []);
+
+  // ── calculateFareDetails ───────────────────────────────────────────────────
+  const calculateFareDetails = (
+    entryTimeStr: string,
+    exitTimeStr?: string,
+    overrideHourlyRate?: number,
+    vehicleType: string = 'Car',
+    depositPaid: number = 0,
+    _area: string = 'Mall Parking'
+  ): FareDetails => {
+    let entry = new Date(entryTimeStr);
+    if (isNaN(entry.getTime())) {
+      // If entryTimeStr is a relative string like '45 mins ago' or 'Just now', convert to estimated timestamp
+      if (entryTimeStr.includes('min')) {
+        const mins = parseInt(entryTimeStr) || 15;
+        entry = new Date(Date.now() - mins * 60 * 1000);
+      } else if (entryTimeStr.includes('hour')) {
+        const hrs = parseInt(entryTimeStr) || 1;
+        entry = new Date(Date.now() - hrs * 60 * 60 * 1000);
+      } else {
+        entry = new Date(Date.now() - 30 * 60 * 1000); // 30 mins ago default
+      }
+    }
+    const exit = exitTimeStr ? new Date(exitTimeStr) : new Date();
+
+    const diffMs = Math.max(0, exit.getTime() - entry.getTime());
+    const durationMinutes = Math.max(1, Math.floor(diffMs / (1000 * 60)));
+
+    // Billing hours calculation: minimum 1 hour, ceiling of hours
+    const chargedHours = Math.max(1, Math.ceil(durationMinutes / 60));
+
+    // Vehicle Type Multipliers
+    const multipliers: Record<string, number> = {
+      Bike: 0.5,
+      Car: 1.0,
+      EV: 1.0,
+      SUV: 1.25,
+    };
+    const vehicleMultiplier = multipliers[vehicleType] || 1.0;
+
+    const rate = overrideHourlyRate ?? settings.hourlyRate;
+    const baseFare = Math.round(chargedHours * rate * vehicleMultiplier);
+
+    // Peak hour check
+    const entryHours = String(entry.getHours()).padStart(2, '0');
+    const entryMins = String(entry.getMinutes()).padStart(2, '0');
+    const entryTimeFormatted = `${entryHours}:${entryMins}`;
+    const peak = isPeakHour(entryTimeFormatted);
+    const peakSurcharge = peak ? Math.round(baseFare * 0.2) : 0; // 20% peak surcharge
+
+    const totalFare = baseFare + peakSurcharge;
+    const amountDue = Math.max(0, totalFare - depositPaid);
+
+    const hrs = Math.floor(durationMinutes / 60);
+    const mins = durationMinutes % 60;
+    const durationFormatted = hrs > 0 ? `${hrs}h ${mins}m` : `${mins} mins`;
+
+    return {
+      durationMinutes,
+      durationFormatted,
+      chargedHours,
+      hourlyRate: rate,
+      vehicleType,
+      vehicleMultiplier,
+      baseFare,
+      isPeak: peak,
+      peakSurcharge,
+      totalFare,
+      depositPaid,
+      amountDue,
+    };
+  };
+
+  // ── processVehicleEntry ─────────────────────────────────────────────────────
+  const processVehicleEntry = async (data: {
+    area: string;
+    slotId: string;
+    vehicleNo: string;
+    vehicleModel?: string;
+    vehicleType?: string;
+    ownerName?: string;
+    ownerPhone?: string;
+    bookingId?: string;
+    entryTime?: string;
+  }): Promise<ParkingLog> => {
+    const entryTime = data.entryTime || new Date().toISOString();
+    const logId = `LOG-${Math.floor(10000 + Math.random() * 90000)}`;
+
+    let depositPaid = 0;
+    if (data.bookingId) {
+      const b = bookings.find((bk) => bk.bookingId === data.bookingId);
+      if (b) depositPaid = b.deposit;
+    } else {
+      const areaSlots = slots[data.area] || [];
+      const currentSlot = areaSlots.find((s) => s.id === data.slotId);
+      if (currentSlot && currentSlot.status === 'reserved') {
+        const b = bookings.find(
+          (bk) => bk.vehicleNo.toUpperCase() === data.vehicleNo.toUpperCase() && bk.status === 'Confirmed'
+        );
+        if (b) depositPaid = b.deposit;
+      }
+    }
+
+    const newLog: ParkingLog = {
+      logId,
+      bookingId: data.bookingId || '',
+      area: data.area,
+      slotId: data.slotId,
+      vehicleNo: data.vehicleNo.toUpperCase(),
+      vehicleModel: data.vehicleModel || 'Standard Vehicle',
+      vehicleType: data.vehicleType || 'Car',
+      ownerName: data.ownerName || 'Walk-in Driver',
+      ownerPhone: data.ownerPhone || 'N/A',
+      entryTime,
+      hourlyRate: settings.hourlyRate,
+      depositPaid,
+      status: 'PARKED',
+      createdAt: new Date().toISOString(),
+    };
+
+    // Write log to Firebase
+    await set(ref(db, `parkingLogs/${logId}`), newLog);
+
+    // Update slot status in Firebase
+    const slotKey = data.slotId.replace(/[^a-zA-Z0-9]/g, '_');
+    await update(ref(db, `slots/${areaKey(data.area)}/${slotKey}`), {
+      status: 'occupied',
+      vehicleNo: data.vehicleNo.toUpperCase(),
+      vehicleModel: data.vehicleModel || 'Standard Vehicle',
+      vehicleType: data.vehicleType || 'Car',
+      ownerName: data.ownerName || 'Walk-in Driver',
+      ownerPhone: data.ownerPhone || 'N/A',
+      occupancyTime: entryTime,
+      sensorStatus: 'Active',
+    });
+
+    return newLog;
+  };
+
+  // ── processVehicleExit ──────────────────────────────────────────────────────
+  const processVehicleExit = async (
+    logIdOrSlotId: string,
+    area: string = activeArea,
+    exitTimeStr?: string
+  ): Promise<{ log: ParkingLog; fareDetails: FareDetails }> => {
+    const exitTime = exitTimeStr || new Date().toISOString();
+
+    // Find active log
+    let activeLog = parkingLogs.find(
+      (l) => l.status === 'PARKED' && (l.logId === logIdOrSlotId || (l.slotId === logIdOrSlotId && l.area === area))
+    );
+
+    if (!activeLog) {
+      const areaSlots = slots[area] || [];
+      const targetSlot = areaSlots.find((s) => s.id === logIdOrSlotId);
+      const entryIso =
+        targetSlot?.occupancyTime &&
+        !targetSlot.occupancyTime.includes('ago') &&
+        !targetSlot.occupancyTime.includes('Reserved')
+          ? targetSlot.occupancyTime
+          : new Date(Date.now() - 45 * 60 * 1000).toISOString();
+
+      let depositPaid = 0;
+      if (targetSlot?.vehicleNo) {
+        const targetPlate = targetSlot.vehicleNo.toUpperCase();
+        const b = bookings.find(
+          (bk) => bk.vehicleNo.toUpperCase() === targetPlate && bk.status === 'Confirmed'
+        );
+        if (b) depositPaid = b.deposit;
+      }
+
+      activeLog = {
+        logId: `LOG-${Math.floor(10000 + Math.random() * 90000)}`,
+        area,
+        slotId: logIdOrSlotId,
+        vehicleNo: targetSlot?.vehicleNo || 'UNKNOWN',
+        vehicleModel: targetSlot?.vehicleModel || 'Car',
+        vehicleType: targetSlot?.vehicleType || 'Car',
+        ownerName: targetSlot?.ownerName || 'Driver',
+        ownerPhone: targetSlot?.ownerPhone || 'N/A',
+        entryTime: entryIso,
+        hourlyRate: settings.hourlyRate,
+        depositPaid,
+        status: 'PARKED',
+        createdAt: entryIso,
+      };
+    }
+
+    const fare = calculateFareDetails(
+      activeLog.entryTime,
+      exitTime,
+      activeLog.hourlyRate || settings.hourlyRate,
+      activeLog.vehicleType || 'Car',
+      activeLog.depositPaid || 0,
+      activeLog.area
+    );
+
+    const updatedLog: ParkingLog = {
+      ...activeLog,
+      exitTime,
+      durationMinutes: fare.durationMinutes,
+      baseFare: fare.baseFare,
+      peakSurcharge: fare.peakSurcharge,
+      totalFare: fare.totalFare,
+      amountDue: fare.amountDue,
+      status: 'OUT_COMPLETED',
+    };
+
+    // Update log in Firebase
+    await set(ref(db, `parkingLogs/${updatedLog.logId}`), updatedLog);
+
+    // Free slot in Firebase
+    const slotKey = activeLog.slotId.replace(/[^a-zA-Z0-9]/g, '_');
+    await update(ref(db, `slots/${areaKey(activeLog.area)}/${slotKey}`), {
+      status: 'available',
+      vehicleNo: '',
+      vehicleModel: '',
+      vehicleType: '',
+      ownerName: '',
+      ownerPhone: '',
+      occupancyTime: '',
+      sensorStatus: 'Inactive',
+    });
+
+    return { log: updatedLog, fareDetails: fare };
+  };
+
   return (
     <ParkingContext.Provider
       value={{
         slots,
         bookings,
+        parkingLogs,
         settings,
         activeArea,
         loading,
@@ -386,6 +694,9 @@ export const ParkingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         updateSlotStatus,
         updateSettings,
         isPeakHour,
+        processVehicleEntry,
+        processVehicleExit,
+        calculateFareDetails,
       }}
     >
       {children}
