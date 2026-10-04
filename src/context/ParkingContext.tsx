@@ -445,71 +445,11 @@ export const ParkingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // ── IoT Simulator (runs locally, writes to Firebase) ────────────────────────
   useEffect(() => {
-    if (!settings.isSimulating || Object.keys(slots).length === 0) return;
-
-    const interval = setInterval(() => {
-      const locations = Object.keys(slots);
-      const randomLoc = locations[Math.floor(Math.random() * locations.length)];
-      const locSlots = slots[randomLoc];
-      if (!locSlots) return;
-
-      // A slot owned by a real GATE check-in is off-limits to the demo
-      // simulator while it is a gate HOLD (reserved): the car has not arrived
-      // yet, so flipping the bay occupied/available would fake a parking
-      // session and wipe the driver's identity. Once the car HAS arrived
-      // (gate slot turned 'occupied' by the sensor/simulator), demo mode may
-      // free it again to demonstrate check-out.
-      const eligible = locSlots.filter((s) => {
-        if (s.sessionSource === 'gate' && s.status !== 'occupied') return false;
-        return s.status === 'available' || s.status === 'occupied';
-      });
-      if (eligible.length === 0) return;
-
-      const randomSlot = eligible[Math.floor(Math.random() * eligible.length)];
-
-      if (randomSlot.status === 'available') {
-        // Never inject a demo car onto a bay that real traffic is bound for:
-        // a gate-held (reserved) or pre-booked bay must keep the booked
-        // driver's identity until the real car arrives.
-        if (randomSlot.sessionSource === 'gate' || randomSlot.vehicleNo) return;
-        const plateCodes = ['DL', 'KA', 'MH', 'HR', 'UP'];
-        const plate = `${plateCodes[Math.floor(Math.random() * plateCodes.length)]}-${Math.floor(10 + Math.random() * 89)}-${String.fromCharCode(65 + Math.floor(Math.random() * 26))}${String.fromCharCode(65 + Math.floor(Math.random() * 26))}-${Math.floor(1000 + Math.random() * 8999)}`;
-        const models = {
-          Car: ['Maruti Swift', 'Hyundai Verna', 'Honda City'],
-          SUV: ['Mahindra Thar', 'Kia Seltos', 'Tata Safari'],
-          EV: ['Ather 450X', 'Tata Punch EV', 'Hyundai Ioniq 5'],
-        };
-        const types = Object.keys(models) as Array<keyof typeof models>;
-        const randomType = types[Math.floor(Math.random() * types.length)];
-        const randomModel = models[randomType][Math.floor(Math.random() * models[randomType].length)];
-
-        updateSlotStatus(randomLoc, randomSlot.id, 'occupied', {
-          vehicleNo: plate,
-          vehicleModel: randomModel,
-          vehicleType: randomType,
-          ownerName: 'IoT Sensor Node ' + Math.floor(1 + Math.random() * 9),
-          ownerPhone: '95' + Math.floor(10000000 + Math.random() * 89999999),
-          occupancyTime: new Date().toISOString(),
-          sessionSource: 'simulator',
-        });
-      } else if (randomSlot.sessionSource === 'simulator') {
-        // Demo mode only frees slots IT occupied: freeing a real gate /
-        // sensor session here is what faked check-outs (red -> green) and
-        // re-stamped the demo plate on the real car's arrival.
-        updateSlotStatus(randomLoc, randomSlot.id, 'available', {
-          vehicleNo: '',
-          vehicleModel: '',
-          vehicleType: '',
-          ownerName: '',
-          ownerPhone: '',
-          occupancyTime: '',
-          sessionSource: '',
-        });
-      }
-    }, 15000);
-
-    return () => clearInterval(interval);
+    // Disabled permanently per user request. 
+    // This stops auto-booking test cases and prevents overwriting of manual slot overrides (like maintenance to available).
+    return;
   }, [settings.isSimulating, slots]);
+
 
   const [parkingLogs, setParkingLogs] = useState<ParkingLog[]>([]);
   // Session watcher only runs once the existing logs have been read, so it never
