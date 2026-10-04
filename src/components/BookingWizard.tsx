@@ -170,38 +170,87 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
     setStep(5); // Proceed to payment
   };
 
+  const loadRazorpay = () => {
+    return new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
   const handlePayment = async () => {
     if (!selectedSlot) return;
     setPaymentLoading(true);
 
-    // Simulate payment delay
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    // Save Reservation in Firebase
-    const ticket = await reserveSlot({
-      area: selectedArea,
-      slotId: selectedSlot.id,
-      date: bookingDate,
-      time: bookingTime,
-      deposit: settings.depositFee,
-      name: customerName,
-      phone: customerPhone,
-      vehicleNo: vehicleNo.toUpperCase(),
-      vehicleModel: vehicleModel,
-      vehicleType: vehicleType,
-    });
-
-    setPaymentLoading(false);
-    setPaymentSuccess(true);
-    setConfirmedBooking(ticket);
-
-    try {
-      localStorage.setItem('parkease_active_ticket', JSON.stringify(ticket));
-    } catch {
-      // localStorage may fail in private mode
+    const res = await loadRazorpay();
+    if (!res) {
+      alert('Razorpay SDK failed to load. Please check your internet connection.');
+      setPaymentLoading(false);
+      return;
     }
 
-    setTimeout(() => setStep(6), 1000);
+    const options = {
+      key: 'rzp_test_Tjvd5U6uqcg2s3',
+      amount: settings.depositFee * 100, // Amount in paise
+      currency: 'INR',
+      name: 'Park-Ease',
+      description: `Parking Deposit for Slot ${selectedSlot.id}`,
+      prefill: {
+        name: customerName,
+        contact: customerPhone,
+      },
+      theme: {
+        color: '#10b981' // emerald-500 matching the UI
+      },
+      modal: {
+        ondismiss: function() {
+          setPaymentLoading(false);
+        }
+      },
+      handler: async function (response: any) {
+        // Payment successful callback
+        try {
+          const ticket = await reserveSlot({
+            area: selectedArea,
+            slotId: selectedSlot.id,
+            date: bookingDate,
+            time: bookingTime,
+            deposit: settings.depositFee,
+            name: customerName,
+            phone: customerPhone,
+            vehicleNo: vehicleNo.toUpperCase(),
+            vehicleModel: vehicleModel,
+            vehicleType: vehicleType,
+          });
+
+          setPaymentLoading(false);
+          setPaymentSuccess(true);
+          setConfirmedBooking(ticket);
+
+          try {
+            localStorage.setItem('parkease_active_ticket', JSON.stringify(ticket));
+          } catch {
+            // localStorage may fail in private mode
+          }
+
+          setTimeout(() => setStep(6), 600);
+        } catch (error) {
+          console.error(error);
+          alert('Payment was successful, but booking failed to save. Please contact admin.');
+          setPaymentLoading(false);
+        }
+      }
+    };
+
+    const paymentObject = new (window as any).Razorpay(options);
+    paymentObject.on('payment.failed', function (response: any) {
+      alert(`Payment failed: ${response.error.description}`);
+      setPaymentLoading(false);
+    });
+
+    paymentObject.open();
   };
 
   const handlePrint = () => {
