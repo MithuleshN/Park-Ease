@@ -534,7 +534,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                   {/* Parking Map grid column */}
                   <div className="md:col-span-2 bg-slate-100/50 dark:bg-slate-950/40 p-6 rounded-2xl border border-slate-200/50 dark:border-slate-800/50 text-center">
                     <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400 block mb-6">
-                      ðŸš— ENTRY BARRIER
+                      🚗 ENTRY BARRIER
                     </span>
                     
                     {/* The Grid layout */}
@@ -575,7 +575,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                     </div>
 
                     <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400 block mt-8">
-                      ðŸš§ EXIT GATES
+                      🚧 EXIT GATES
                     </span>
 
                     {/* Legend */}
