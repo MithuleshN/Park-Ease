@@ -610,7 +610,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                         </div>
                         <div className="flex justify-between items-center text-sm pt-1">
                           <span className="font-bold text-slate-500">Deposit:</span>
-                          <span className="text-lg font-black text-primary dark:text-blue-400">â‚¹{settings.depositFee}</span>
+                          <span className="text-lg font-black text-primary dark:text-blue-400">₹{settings.depositFee}</span>
                         </div>
                       </div>
                     ) : (
@@ -783,7 +783,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                     </div>
                     <div className="border-t border-slate-200 dark:border-slate-800 pt-3 flex justify-between items-center text-sm font-extrabold">
                       <span>Reserve Deposit:</span>
-                      <span className="text-xl font-black text-primary dark:text-blue-400">â‚¹{settings.depositFee}</span>
+                      <span className="text-xl font-black text-primary dark:text-blue-400">₹{settings.depositFee}</span>
                     </div>
                   </div>
 
@@ -849,7 +849,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                       onClick={handlePayment}
                       className="flex items-center gap-1.5 bg-secondary hover:bg-secondary-hover text-white px-8 py-3.5 rounded-full font-bold cursor-pointer glow-secondary hover:scale-103 transition-transform"
                     >
-                      Pay â‚¹{settings.depositFee} <ArrowRight className="h-4 w-4" />
+                      Pay ₹{settings.depositFee} <ArrowRight className="h-4 w-4" />
                     </button>
                   </div>
                 )}
@@ -925,8 +925,8 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                     <div>
                       <p className="font-extrabold text-[12px]">Smart Gate Instructions:</p>
                       <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5 leading-relaxed">
-                        â€¢ <strong>Gate In:</strong> Show this QR to the entrance scanner to start your live parking timestamp and open the barrier gate.<br />
-                        â€¢ <strong>Gate Out:</strong> Scan this same QR at the exit to automatically calculate parking duration and bill your final fare.
+                        • <strong>Gate In:</strong> Show this QR to the entrance scanner to start your live parking timestamp and open the barrier gate.<br />
+                        • <strong>Gate Out:</strong> Scan this same QR at the exit to automatically calculate parking duration and bill your final fare.
                       </p>
                     </div>
                   </div>
@@ -938,7 +938,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                     <div><span className="text-slate-400 block font-semibold">Plate No:</span> <span className="font-bold text-primary">{confirmedBooking.vehicleNo}</span></div>
                     <div><span className="text-slate-400 block font-semibold">Model / Type:</span> <span className="font-bold text-slate-850 dark:text-slate-200">{confirmedBooking.vehicleModel} ({confirmedBooking.vehicleType})</span></div>
                     <div><span className="text-slate-400 block font-semibold">Date & Time:</span> <span className="font-bold text-slate-855 dark:text-slate-200">{confirmedBooking.date} / {confirmedBooking.time}</span></div>
-                    <div><span className="text-slate-400 block font-semibold">Deposit status:</span> <span className="font-black text-emerald-500">â‚¹{confirmedBooking.deposit} paid</span></div>
+                    <div><span className="text-slate-400 block font-semibold">Deposit status:</span> <span className="font-black text-emerald-500">₹{confirmedBooking.deposit} paid</span></div>
                   </div>
 
                   {/* Ticket bottom code */}
