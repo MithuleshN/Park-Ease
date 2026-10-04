@@ -34,11 +34,61 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
   const [selectedArea, setSelectedArea] = useState<string>('Mall Parking');
   
   // Date and Time selection
-  const [bookingDate, setBookingDate] = useState<string>(
-    new Date().toISOString().split('T')[0]
-  );
-  const [bookingTime, setBookingTime] = useState<string>('10:00'); // default peak hour time
+  // Helper to safely get YYYY-MM-DD in local time (toISOString returns UTC which breaks around midnight)
+  const getLocalDateStr = (d: Date = new Date()) => {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  };
+
+  const [bookingDate, setBookingDate] = useState<string>(getLocalDateStr());
+
+  // Default: Next 30-min block so users don't start with a past time
+  const getDefaultTime = (): string => {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() + 15); // Push to next interval if close
+    const m = now.getMinutes();
+    now.setMinutes(m >= 30 ? 30 : 0);
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  };
+  const [bookingTime, setBookingTime] = useState<string>(getDefaultTime);
   const [isPeak, setIsPeak] = useState<boolean>(true);
+  const [isPast, setIsPast] = useState<boolean>(false);
+
+  // Today's date string and computed min-time for the time input
+  const todayStr = getLocalDateStr();
+  const isToday = bookingDate === todayStr;
+  const minTimeToday = (() => {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() + 1);
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  })();
+
+  const generateTimeOptions = () => {
+    const options = [];
+    for (let h = 0; h < 24; h++) {
+      for (let m = 0; m < 60; m += 30) {
+        const val = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        if (isToday) {
+          const [mh, mn] = minTimeToday.split(':').map(Number);
+          if (h < mh || (h === mh && m < mn)) {
+            continue;
+          }
+        }
+        options.push(val);
+      }
+    }
+    // Ensure the current bookingTime is in the list (if they picked a custom non-30min time before)
+    if (bookingTime && !options.includes(bookingTime)) {
+      if (isToday) {
+        const [bh, bm] = bookingTime.split(':').map(Number);
+        const [mh, mn] = minTimeToday.split(':').map(Number);
+        if (!(bh < mh || (bh === mh && bm < mn))) options.unshift(bookingTime);
+      } else {
+        options.unshift(bookingTime);
+      }
+    }
+    return options;
+  };
+  const timeOptions = generateTimeOptions();
 
   // Selected Slot
   const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null);
@@ -64,7 +114,12 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
 
   useEffect(() => {
     setIsPeak(isPeakHour(bookingTime));
-  }, [bookingTime, settings]);
+    // Check if the selected date+time combination is already in the past
+    const [hh, mm] = bookingTime.split(':').map(Number);
+    const selected = new Date(bookingDate);
+    selected.setHours(hh, mm, 0, 0);
+    setIsPast(selected.getTime() < Date.now() + 60_000); // 1-min buffer
+  }, [bookingDate, bookingTime, settings]);
 
   const handleAreaSelect = (area: string) => {
     setSelectedArea(area);
@@ -326,7 +381,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                 className="space-y-6"
               >
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">Step 2: Reservation Date & Time</h3>
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">Step 2: Reservation Date &amp; Time</h3>
                   <p className="text-sm text-slate-500">Reservations are available only during configured peak hours.</p>
                 </div>
 
@@ -339,8 +394,22 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                     <input
                       type="date"
                       value={bookingDate}
-                      min={new Date().toISOString().split('T')[0]}
-                      onChange={(e) => setBookingDate(e.target.value)}
+                      min={todayStr}
+                      onChange={(e) => {
+                        setBookingDate(e.target.value);
+                        // If user picks today and current time is past, bump time forward
+                        if (e.target.value === todayStr) {
+                          const now = new Date();
+                          now.setMinutes(now.getMinutes() + 5);
+                          const hh = String(now.getHours()).padStart(2, '0');
+                          const mm = String(now.getMinutes()).padStart(2, '0');
+                          const bumped = `${hh}:${mm}`;
+                          const [bh, bm] = bookingTime.split(':').map(Number);
+                          const sel = new Date();
+                          sel.setHours(bh, bm, 0, 0);
+                          if (sel.getTime() < Date.now() + 60_000) setBookingTime(bumped);
+                        }
+                      }}
                       className="w-full p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-350 focus:border-primary focus:outline-none"
                     />
                   </div>
@@ -350,43 +419,72 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                     <label className="text-xs font-bold uppercase text-slate-400 flex items-center gap-1.5">
                       <Clock className="h-4 w-4 text-primary" /> Booking Time
                     </label>
-                    <input
-                      type="time"
+                    <select
                       value={bookingTime}
                       onChange={(e) => setBookingTime(e.target.value)}
-                      className="w-full p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-350 focus:border-primary focus:outline-none"
-                    />
+                      className={`w-full p-4 rounded-xl border bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-350 focus:outline-none transition-colors ${
+                        isPast
+                          ? 'border-red-400 dark:border-red-600 focus:border-red-500'
+                          : 'border-slate-200 dark:border-slate-800 focus:border-primary'
+                      }`}
+                    >
+                      {timeOptions.map(t => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                    {isPast && (
+                      <p className="text-xs text-red-500 font-semibold flex items-center gap-1">
+                        <AlertCircle className="h-3.5 w-3.5" />
+                        This time has already passed — pick a future time.
+                      </p>
+                    )}
                   </div>
                 </div>
 
-                {/* Peak Hours Alert Indicators */}
-                <div className={`p-4 rounded-2xl flex items-start gap-3 border text-left ${
-                  isPeak 
-                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-800 dark:text-emerald-450 dark:bg-emerald-950/20' 
-                    : 'bg-rose-500/10 border-rose-500/20 text-rose-800 dark:text-rose-450 dark:bg-rose-950/20'
-                }`}>
-                  {isPeak ? (
-                    <>
-                      <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
-                      <div>
-                        <h4 className="text-sm font-bold">Peak Hours Reservation Active</h4>
-                        <p className="text-xs opacity-80 mt-0.5">
-                          Selected time slot is inside configuring window ({settings.peakHoursStart} - {settings.peakHoursEnd}). Ready to reserve.
-                        </p>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <AlertCircle className="h-5 w-5 text-rose-500 shrink-0 mt-0.5" />
-                      <div>
-                        <h4 className="text-sm font-bold">Reservation Unavailable</h4>
-                        <p className="text-xs opacity-80 mt-0.5">
-                          Peak Reserve is closed. Free off-peak hours offer direct drive-in parking without deposit. Please pick a time between {settings.peakHoursStart} and {settings.peakHoursEnd}.
-                        </p>
-                      </div>
-                    </>
-                  )}
-                </div>
+                {/* Past-time error banner */}
+                {isPast && (
+                  <div className="p-4 rounded-2xl flex items-start gap-3 border text-left bg-red-500/10 border-red-500/20 text-red-800 dark:text-red-400 dark:bg-red-950/20">
+                    <AlertCircle className="h-5 w-5 text-red-500 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="text-sm font-bold">Booking Time is in the Past</h4>
+                      <p className="text-xs opacity-80 mt-0.5">
+                        You cannot reserve a slot for a time that has already passed.
+                        Please select a future date and time to continue.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Peak Hours Alert Indicators (only shown when time is valid) */}
+                {!isPast && (
+                  <div className={`p-4 rounded-2xl flex items-start gap-3 border text-left ${
+                    isPeak
+                      ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-800 dark:text-emerald-450 dark:bg-emerald-950/20'
+                      : 'bg-rose-500/10 border-rose-500/20 text-rose-800 dark:text-rose-450 dark:bg-rose-950/20'
+                  }`}>
+                    {isPeak ? (
+                      <>
+                        <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
+                        <div>
+                          <h4 className="text-sm font-bold">Peak Hours Reservation Active</h4>
+                          <p className="text-xs opacity-80 mt-0.5">
+                            Selected time slot is inside configuring window ({settings.peakHoursStart} - {settings.peakHoursEnd}). Ready to reserve.
+                          </p>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="h-5 w-5 text-rose-500 shrink-0 mt-0.5" />
+                        <div>
+                          <h4 className="text-sm font-bold">Reservation Unavailable</h4>
+                          <p className="text-xs opacity-80 mt-0.5">
+                            Peak Reserve is closed. Free off-peak hours offer direct drive-in parking without deposit. Please pick a time between {settings.peakHoursStart} and {settings.peakHoursEnd}.
+                          </p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
 
                 {/* Navigation Buttons */}
                 <div className="flex justify-between pt-4">
@@ -397,11 +495,11 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                     <ArrowLeft className="h-4 w-4" /> Back
                   </button>
                   <button
-                    disabled={!isPeak}
+                    disabled={!isPeak || isPast}
                     onClick={() => setStep(3)}
-                    className={`flex items-center gap-1.5 px-6 py-3 rounded-full font-bold cursor-pointer glow-primary text-white ${
-                      isPeak 
-                        ? 'bg-primary hover:bg-primary-hover' 
+                    className={`flex items-center gap-1.5 px-6 py-3 rounded-full font-bold cursor-pointer text-white ${
+                      isPeak && !isPast
+                        ? 'bg-primary hover:bg-primary-hover glow-primary'
                         : 'bg-slate-300 dark:bg-slate-800 text-slate-400 cursor-not-allowed opacity-50 shadow-none'
                     }`}
                   >
@@ -429,7 +527,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                   {/* Parking Map grid column */}
                   <div className="md:col-span-2 bg-slate-100/50 dark:bg-slate-950/40 p-6 rounded-2xl border border-slate-200/50 dark:border-slate-800/50 text-center">
                     <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400 block mb-6">
-                      🚗 ENTRY BARRIER
+                      ðŸš— ENTRY BARRIER
                     </span>
                     
                     {/* The Grid layout */}
@@ -470,7 +568,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                     </div>
 
                     <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400 block mt-8">
-                      🚧 EXIT GATES
+                      ðŸš§ EXIT GATES
                     </span>
 
                     {/* Legend */}
@@ -505,7 +603,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                         </div>
                         <div className="flex justify-between items-center text-sm pt-1">
                           <span className="font-bold text-slate-500">Deposit:</span>
-                          <span className="text-lg font-black text-primary dark:text-blue-400">₹{settings.depositFee}</span>
+                          <span className="text-lg font-black text-primary dark:text-blue-400">â‚¹{settings.depositFee}</span>
                         </div>
                       </div>
                     ) : (
@@ -678,7 +776,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                     </div>
                     <div className="border-t border-slate-200 dark:border-slate-800 pt-3 flex justify-between items-center text-sm font-extrabold">
                       <span>Reserve Deposit:</span>
-                      <span className="text-xl font-black text-primary dark:text-blue-400">₹{settings.depositFee}</span>
+                      <span className="text-xl font-black text-primary dark:text-blue-400">â‚¹{settings.depositFee}</span>
                     </div>
                   </div>
 
@@ -744,7 +842,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                       onClick={handlePayment}
                       className="flex items-center gap-1.5 bg-secondary hover:bg-secondary-hover text-white px-8 py-3.5 rounded-full font-bold cursor-pointer glow-secondary hover:scale-103 transition-transform"
                     >
-                      Pay ₹{settings.depositFee} <ArrowRight className="h-4 w-4" />
+                      Pay â‚¹{settings.depositFee} <ArrowRight className="h-4 w-4" />
                     </button>
                   </div>
                 )}
@@ -820,8 +918,8 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                     <div>
                       <p className="font-extrabold text-[12px]">Smart Gate Instructions:</p>
                       <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5 leading-relaxed">
-                        • <strong>Gate In:</strong> Show this QR to the entrance scanner to start your live parking timestamp and open the barrier gate.<br />
-                        • <strong>Gate Out:</strong> Scan this same QR at the exit to automatically calculate parking duration and bill your final fare.
+                        â€¢ <strong>Gate In:</strong> Show this QR to the entrance scanner to start your live parking timestamp and open the barrier gate.<br />
+                        â€¢ <strong>Gate Out:</strong> Scan this same QR at the exit to automatically calculate parking duration and bill your final fare.
                       </p>
                     </div>
                   </div>
@@ -833,7 +931,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                     <div><span className="text-slate-400 block font-semibold">Plate No:</span> <span className="font-bold text-primary">{confirmedBooking.vehicleNo}</span></div>
                     <div><span className="text-slate-400 block font-semibold">Model / Type:</span> <span className="font-bold text-slate-850 dark:text-slate-200">{confirmedBooking.vehicleModel} ({confirmedBooking.vehicleType})</span></div>
                     <div><span className="text-slate-400 block font-semibold">Date & Time:</span> <span className="font-bold text-slate-855 dark:text-slate-200">{confirmedBooking.date} / {confirmedBooking.time}</span></div>
-                    <div><span className="text-slate-400 block font-semibold">Deposit status:</span> <span className="font-black text-emerald-500">₹{confirmedBooking.deposit} paid</span></div>
+                    <div><span className="text-slate-400 block font-semibold">Deposit status:</span> <span className="font-black text-emerald-500">â‚¹{confirmedBooking.deposit} paid</span></div>
                   </div>
 
                   {/* Ticket bottom code */}

@@ -12,7 +12,8 @@ import {
   QrCode,
   LogIn,
   LogOut,
-  CarFront
+  CarFront,
+  Clock
 } from 'lucide-react';
 import { playScanSuccessBeep, playScanErrorBeep } from '../utils/scannerAudio';
 
@@ -46,6 +47,19 @@ interface QrGateScannerProps {
     logId?: string;
     depositPaid?: number;
   }[];
+  recentCheckouts: {
+    logId: string;
+    slotId: string;
+    vehicleNo: string;
+    vehicleModel?: string;
+    vehicleType?: string;
+    area: string;
+    entryTime: string;
+    exitTime: string;
+    durationMinutes: number;
+    totalFare: number;
+    amountDue: number;
+  }[];
 }
 
 export const QrGateScanner: React.FC<QrGateScannerProps> = ({
@@ -55,6 +69,7 @@ export const QrGateScanner: React.FC<QrGateScannerProps> = ({
   activeArea,
   pendingCheckIns,
   activeParkedVehicles,
+  recentCheckouts,
 }) => {
   const [activeTab, setActiveTab] = useState<'camera' | 'file' | 'demo' | 'manual'>('camera');
   const [cameraStarted, setCameraStarted] = useState(false);
@@ -383,7 +398,7 @@ export const QrGateScanner: React.FC<QrGateScannerProps> = ({
               <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-xs text-blue-600 dark:text-blue-300 flex items-start gap-2.5">
                 <Zap className="h-4.5 w-4.5 shrink-0 text-amber-500 mt-0.5" />
                 <p>
-                  <strong>Instant Demo Mode:</strong> Test both <strong>Gate In</strong> (starting live parking timestamp) and <strong>Gate Out</strong> (calculating fare & exiting) in 1 click without needing a physical camera or phone!
+                  <strong>Instant Demo Mode:</strong> Test the full IoT flow in 1 click — occupy a slot to <strong>start the clock</strong>, vacate it to <strong>stop the clock</strong>, then scan at the exit gate to <strong>show the elapsed time & fare</strong>. No camera or phone needed!
                 </p>
               </div>
 
@@ -512,6 +527,58 @@ export const QrGateScanner: React.FC<QrGateScannerProps> = ({
                 ) : (
                   <p className="text-xs text-slate-400 italic bg-slate-100 dark:bg-slate-800/40 p-3 rounded-xl">
                     No vehicles currently parked inside. Scan a vehicle in first!
+                  </p>
+                )}
+              </div>
+
+              {/* Section 3: Gate OUT (Sensor-Closed Sessions) */}
+              <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+                <div className="flex items-center gap-1.5">
+                  <Clock className="h-4 w-4 text-amber-500" />
+                  <h4 className="font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                    3. Vacated Slots (Sensor Stopped Clock — Awaiting Exit Bill)
+                  </h4>
+                </div>
+
+                {recentCheckouts.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {recentCheckouts.map((job) => {
+                      const payload = JSON.stringify({
+                        parkEasePass: true,
+                        vehicleNo: job.vehicleNo,
+                        slotId: job.slotId,
+                        area: job.area,
+                        logId: job.logId,
+                        vehicleType: job.vehicleType,
+                      });
+
+                      const hrs = Math.floor(job.durationMinutes / 60);
+                      const mins = job.durationMinutes % 60;
+                      const durationText = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+
+                      return (
+                        <button
+                          key={job.logId}
+                          type="button"
+                          onClick={() => handleSuccess(payload)}
+                          className="p-3 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-900/40 border border-amber-200 dark:border-amber-800 rounded-2xl text-left cursor-pointer transition flex justify-between items-center"
+                        >
+                          <div>
+                            <span className="font-black text-xs text-slate-800 dark:text-slate-100">{job.vehicleNo}</span>
+                            <span className="block text-[10px] text-amber-600 dark:text-amber-400 font-bold">
+                              Slot {job.slotId} • {durationText} • ₹{job.amountDue} due
+                            </span>
+                          </div>
+                          <span className="px-2 py-1 bg-amber-600 text-white text-[10px] font-bold rounded-lg shrink-0">
+                            - Bill OUT
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400 italic bg-slate-100 dark:bg-slate-800/40 p-3 rounded-xl">
+                    No vacated slots awaiting billing yet. Let the IoT simulator free a slot (or use a slot override) to stop a clock, then bill it here.
                   </p>
                 )}
               </div>

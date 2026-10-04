@@ -86,6 +86,8 @@ export const AdminDashboard: React.FC = () => {
     entryTime: string;
     depositPaid: number;
     logId?: string;
+    /** True when the IoT sensor already stopped the clock (slot went available). */
+    sensorClosed?: boolean;
   } | null>(null);
   const [exitTimeInput, setExitTimeInput] = useState(
     new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
@@ -225,50 +227,112 @@ export const AdminDashboard: React.FC = () => {
     setScanOutModalOpen(true);
   };
 
+  // Quick helper to bill a vehicle whose slot already emptied — the IoT sensor
+  // stopped the clock when the slot turned 'available'. Opens the exit-gate modal
+  // pre-filled with the sensor-measured duration & fare.
+  const openScanOutForLog = (log: ParkingLog) => {
+    setExitTarget({
+      area: log.area,
+      slotId: log.slotId,
+      vehicleNo: log.vehicleNo,
+      vehicleModel: log.vehicleModel || 'Car',
+      vehicleType: log.vehicleType || 'Car',
+      ownerName: log.ownerName || 'Driver',
+      ownerPhone: log.ownerPhone || 'N/A',
+      entryTime: log.entryTime,
+      depositPaid: log.depositPaid || 0,
+      logId: log.logId,
+      sensorClosed: log.status === 'OUT_COMPLETED',
+    });
+
+    const base = log.exitTime ? new Date(log.exitTime) : new Date();
+    setExitTimeInput(
+      new Date(base.getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+    );
+    setScanOutModalOpen(true);
+  };
+
   // Perform Entry Submit (Gate IN)
   const handlePerformEntrySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!entryVehicleNo.trim()) {
-      alert('Please enter a vehicle registration number.');
+    const plateNo = entryVehicleNo.trim();
+    if (!plateNo) {
+      alert('⚠️ Please enter the vehicle registration number before checking in.');
       return;
     }
 
     const availableSlots = slots[entryArea]?.filter((s) => s.status === 'available' || s.id === entrySlotId) || [];
     const targetSlot = entrySlotId || (availableSlots[0]?.id || 'A1');
 
+    // Validate the chosen slot is not already occupied by a different vehicle
+    const chosenSlot = (slots[entryArea] || []).find(s => s.id === targetSlot);
+    if (chosenSlot && chosenSlot.status === 'occupied' && chosenSlot.vehicleNo && chosenSlot.vehicleNo.toUpperCase() !== plateNo.toUpperCase()) {
+      alert(`⚠️ Slot ${targetSlot} is already occupied by ${chosenSlot.vehicleNo}. Please choose a different slot.`);
+      return;
+    }
+
     const entryIso = new Date(entryTimeInput).toISOString();
 
-    const createdLog = await processVehicleEntry({
-      area: entryArea,
-      slotId: targetSlot,
-      vehicleNo: entryVehicleNo.toUpperCase(),
-      vehicleModel: entryVehicleModel,
-      vehicleType: entryVehicleType,
-      ownerName: entryOwnerName,
-      ownerPhone: entryOwnerPhone,
-      bookingId: entryBookingId,
-      entryTime: entryIso,
-    });
+    try {
+      const createdLog = await processVehicleEntry({
+        area: entryArea,
+        slotId: targetSlot,
+        vehicleNo: plateNo.toUpperCase(),
+        vehicleModel: entryVehicleModel,
+        vehicleType: entryVehicleType,
+        ownerName: entryOwnerName,
+        ownerPhone: entryOwnerPhone,
+        bookingId: entryBookingId,
+        entryTime: entryIso,
+      });
 
-    setScanInModalOpen(false);
-    alert(`✅ VEHICLE CHECK-IN SUCCESSFUL!\n\nBarrier Gate OPENED for ${createdLog.vehicleNo} at slot ${createdLog.slotId} (${createdLog.area}).\nEntry Time: ${new Date(createdLog.entryTime).toLocaleTimeString()}`);
+      setScanInModalOpen(false);
+      playGateOpenSound();
+      alert(
+        `✅ GATE ENTRY AUTHORISED!\n\n` +
+        `Vehicle: ${createdLog.vehicleNo}\n` +
+        `Slot: ${createdLog.slotId} (${createdLog.area})\n\n` +
+        `⏱️ Parking clock will START automatically when the slot sensor\n` +
+        `   confirms the car is physically in the bay (slot → Occupied).\n\n` +
+        `📤 At exit: scan this QR again to see elapsed time & fare.`
+      );
+    } catch (err) {
+      console.error('Vehicle check-in failed:', err);
+      alert(
+        `❌ GATE CHECK-IN FAILED!\n\n` +
+        `Reason: ${err instanceof Error ? err.message : String(err)}\n\n` +
+        `If this says "Permission denied", open Firebase Console → Realtime Database → Rules\n` +
+        `and allow read/write on the "parkingLogs" node.`
+      );
+    }
   };
 
-  // Perform Exit Submit (Gate OUT & Calculate Fare)
+  // Perform Exit Submit (Gate OUT & Settle Fare)
   const handlePerformExitSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!exitTarget) return;
 
     const exitIso = new Date(exitTimeInput).toISOString();
-    const result = await processVehicleExit(
-      exitTarget.logId || exitTarget.slotId,
-      exitTarget.area,
-      exitIso
-    );
 
-    setCompletedReceipt(result.log);
-    setScanOutModalOpen(false);
-    setReceiptModalOpen(true);
+    try {
+      const result = await processVehicleExit(
+        exitTarget.logId || exitTarget.slotId,
+        exitTarget.area,
+        exitIso
+      );
+
+      setCompletedReceipt(result.log);
+      setScanOutModalOpen(false);
+      setReceiptModalOpen(true);
+    } catch (err) {
+      console.error('Vehicle check-out failed:', err);
+      alert(
+        `❌ VEHICLE CHECK-OUT FAILED!\n\n` +
+        `Reason: ${err instanceof Error ? err.message : String(err)}\n\n` +
+        `If this says "Permission denied", open Firebase Console → Realtime Database → Rules\n` +
+        `and allow read/write on the "parkingLogs" node.`
+      );
+    }
   };
 
   // ── Handle QR Scanner result: parse payload → Gate IN or Gate OUT ──────────────
@@ -289,7 +353,19 @@ export const AdminDashboard: React.FC = () => {
       const slotId = String(parsed.slotId || '');
       const area = String(parsed.area || activeArea);
 
-      // Check if the vehicle is already PARKED → Gate OUT
+      // ── EXIT GATE: Vehicle already left the slot (sensor stopped the clock) ──
+      // The driver scans QR at exit gate AFTER the sensor detected the car left.
+      // Show the sensor-measured duration & fare for billing.
+      const billableSession = parkingLogs.find(
+        (l) => l.status === 'OUT_COMPLETED' && !l.billed && l.vehicleNo.toUpperCase() === vehicleNo
+      );
+      if (billableSession) {
+        playGateOpenSound();
+        openScanOutForLog(billableSession);
+        return;
+      }
+
+      // ── EXIT GATE: Vehicle is currently in an occupied slot → Gate OUT ────────
       let parkedSlot: Slot | null = null;
       let parkedArea = area;
 
@@ -304,22 +380,41 @@ export const AdminDashboard: React.FC = () => {
       });
 
       if (parkedSlot) {
-        // Vehicle is inside → trigger Gate OUT
+        // Vehicle is physically parked → open exit gate & calculate fare
         playGateOpenSound();
         openScanOutForSlot(parkedArea, parkedSlot);
         return;
       }
 
-      // Vehicle is NOT inside yet → trigger Gate IN
-      // Pre-fill entry form from QR payload
+      // ── CHECK: Vehicle already gate-authorised and awaiting arrival ───────────
+      // Don't open a second check-in. Just inform the admin.
+      const heldLog = parkingLogs.find(
+        (l) => l.status === 'PARKED' && l.awaitingArrival &&
+          (vehicleNo ? l.vehicleNo.toUpperCase() === vehicleNo : (l.bookingId === bookingId && !!bookingId))
+      );
+      if (heldLog) {
+        alert(
+          `ℹ️ ${vehicleNo || `Booking ${bookingId}`} is already authorised at the gate for slot ${heldLog.slotId} (${heldLog.area}).\n\n` +
+          `⏱️ The parking clock will start automatically when the slot sensor detects the car in the bay.\n\n` +
+          `📤 Scan this QR at the EXIT gate after the car leaves to view duration & fare.`
+        );
+        return;
+      }
+
+      // ── ENTRY GATE: Vehicle not yet checked in → Gate IN ─────────────────────
       const availArea = slots[area] ? area : activeArea;
-      const availSlots = slots[availArea]?.filter((s) => s.status === 'available' || s.id === slotId) || [];
+      const availSlots = slots[availArea]?.filter((s) => {
+        if (s.id === slotId) return true;
+        if (s.status !== 'available') return false;
+        if (s.sessionSource === 'gate' || s.vehicleNo) return false;
+        return true;
+      }) || [];
       const targetSlotId = slotId || availSlots[0]?.id || 'A1';
 
       setEntryArea(availArea);
       setEntrySlotId(targetSlotId);
       setEntryVehicleNo(vehicleNo);
-      setEntryVehicleModel(String(parsed.vehicleModel || 'Car'));
+      setEntryVehicleModel(String(parsed.vehicleModel || 'Standard Vehicle'));
       setEntryVehicleType(String(parsed.vehicleType || 'Car'));
       setEntryOwnerName(String(parsed.name || 'Walk-in Driver'));
       setEntryOwnerPhone(String(parsed.phone || '9876543210'));
@@ -386,6 +481,15 @@ export const AdminDashboard: React.FC = () => {
 
     if (foundSlot) {
       openScanOutForSlot(foundArea, foundSlot);
+      return;
+    }
+
+    // Vehicle already vacated → bill from the sensor-closed session
+    const billable = parkingLogs.find(
+      (l) => l.status === 'OUT_COMPLETED' && !l.billed && l.vehicleNo.toLowerCase().includes(q)
+    );
+    if (billable) {
+      openScanOutForLog(billable);
     }
   };
 
@@ -457,7 +561,7 @@ export const AdminDashboard: React.FC = () => {
               </h2>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Scan the user's booking QR code at entry to start the parking clock, or at exit to automatically calculate and bill the fare.
+              Parking clock is IoT-sensor driven — it starts when a slot turns OCCUPIED and stops when it turns AVAILABLE. Scan the QR at the exit gate to instantly show the elapsed time & fare.
             </p>
           </div>
 
@@ -686,6 +790,15 @@ export const AdminDashboard: React.FC = () => {
             <p className="text-xs text-slate-450 mb-4 font-medium leading-relaxed">
               When toggled, system auto-simulates vehicle entrances and exits every 15 seconds to demonstrate dynamic dashboards.
             </p>
+            <p className={`text-[11px] font-bold rounded-xl px-3 py-2 mb-4 leading-relaxed ${
+              simState
+                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                : 'bg-slate-100 text-slate-500 dark:bg-slate-800/40 dark:text-slate-400'
+            }`}>
+              {simState
+                ? '⚠️ Keep this OFF while using the QR gate or the ESP32 sensor. The simulator stamps random plates and frees slots every 15 s, which overwrites real check-ins and telemetry logs.'
+                : 'Real gate check-ins, ESP32 sensor reports and telemetry logs are authoritative while this is OFF.'}
+            </p>
             <div className="flex justify-between items-center bg-slate-100/50 dark:bg-slate-950/40 p-3 rounded-2xl border border-slate-200/50 dark:border-slate-800/50">
               <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Simulation interval:</span>
               <button
@@ -775,12 +888,19 @@ export const AdminDashboard: React.FC = () => {
             <tbody>
               {filteredLogs.length > 0 ? (
                 filteredLogs.map((log) => {
-                  const entryDateFormatted = new Date(log.entryTime).toLocaleString([], {
-                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                  });
-                  const exitDateFormatted = log.exitTime ? new Date(log.exitTime).toLocaleString([], {
-                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                  }) : '--';
+                  // Legacy / simulator rows can carry text such as "Just now" instead of an
+                  // ISO timestamp, so show it verbatim rather than "Invalid Date".
+                  const formatLogTime = (value?: string) => {
+                    if (!value) return '--';
+                    const parsed = new Date(value);
+                    return isNaN(parsed.getTime())
+                      ? value
+                      : parsed.toLocaleString([], {
+                          month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                        });
+                  };
+                  const entryDateFormatted = formatLogTime(log.entryTime);
+                  const exitDateFormatted = formatLogTime(log.exitTime);
 
                   const durationText = log.durationMinutes 
                     ? `${Math.floor(log.durationMinutes / 60)}h ${log.durationMinutes % 60}m`
@@ -816,10 +936,17 @@ export const AdminDashboard: React.FC = () => {
                       <td className="p-4 text-right">
                         {log.status === 'PARKED' ? (
                           <button
-                            onClick={() => openScanOutForSlot(log.area, { id: log.slotId, status: 'occupied', vehicleNo: log.vehicleNo, vehicleModel: log.vehicleModel, vehicleType: log.vehicleType, ownerName: log.ownerName, ownerPhone: log.ownerPhone, occupancyTime: log.entryTime, sensorStatus: 'Active' })}
+                            onClick={() => openScanOutForLog(log)}
                             className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold text-[10px] cursor-pointer"
                           >
                             Check-Out & Bill
+                          </button>
+                        ) : log.billed === false ? (
+                          <button
+                            onClick={() => openScanOutForLog(log)}
+                            className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold text-[10px] cursor-pointer"
+                          >
+                            Bill @ Exit Gate
                           </button>
                         ) : (
                           <button
@@ -1163,6 +1290,9 @@ export const AdminDashboard: React.FC = () => {
           }))}
         activeParkedVehicles={Object.entries(slots).flatMap(([areaName, slotList]) =>
           slotList
+            // Only sensors-confirmed OCCUPIED bays are genuinely parked: a
+            // gate-held 'reserved' bay has no running clock, so listing it
+            // here is what let the scanner bill a car that never arrived.
             .filter((s) => s.status === 'occupied')
             .map((s) => {
               const activeLog = parkingLogs.find(
@@ -1182,29 +1312,61 @@ export const AdminDashboard: React.FC = () => {
               };
             })
         )}
+        recentCheckouts={parkingLogs
+          .filter((l) => l.status === 'OUT_COMPLETED' && !l.billed)
+          .map((l) => ({
+            logId: l.logId,
+            slotId: l.slotId,
+            vehicleNo: l.vehicleNo,
+            vehicleModel: l.vehicleModel,
+            vehicleType: l.vehicleType,
+            area: l.area,
+            entryTime: l.entryTime,
+            exitTime: l.exitTime || '',
+            durationMinutes: l.durationMinutes || 0,
+            totalFare: l.totalFare || 0,
+            amountDue: l.amountDue || 0,
+          }))}
       />
 
-      {/* ── MODAL 1: CHECK-IN VEHICLE (GATE IN) ─────────────────────────────────── */}
+      {/* ── MODAL 1: CHECK-IN VEHICLE (GATE IN / AUTHORISE ENTRY) ────────────────── */}
       {scanInModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="w-full max-w-lg glass-solid rounded-3xl p-6 border border-slate-200 dark:border-slate-800 text-left space-y-6 shadow-2xl">
+          <div className="w-full max-w-lg glass-solid rounded-3xl p-6 border border-slate-200 dark:border-slate-800 text-left space-y-5 shadow-2xl">
             <div className="flex justify-between items-center pb-3 border-b border-slate-200 dark:border-slate-800">
               <div className="flex items-center gap-2">
                 <LogIn className="h-5 w-5 text-emerald-500" />
-                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
-                  Vehicle Gate Entry (Check-In)
-                </h3>
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                    Vehicle Gate Entry — Authorise Check-In
+                  </h3>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    ⏱️ Parking clock starts when the slot sensor confirms the car is in the bay.
+                  </p>
+                </div>
               </div>
-              <button 
-                onClick={() => setScanInModalOpen(false)} 
+              <button
+                onClick={() => setScanInModalOpen(false)}
                 className="text-slate-400 hover:text-slate-600 font-bold text-xl cursor-pointer"
               >
                 &times;
               </button>
             </div>
 
+            {/* IoT clock info banner */}
+            <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-[11px] text-emerald-800 dark:text-emerald-300 flex items-start gap-2">
+              <span className="text-lg leading-none">&#9989;</span>
+              <div>
+                <strong>How the clock works:</strong><br />
+                Gate scan → slot held as <em>Reserved</em> (no charge yet).<br />
+                Slot sensor detects car → slot turns <em>Occupied</em> → <strong>clock starts</strong>.<br />
+                Car leaves → slot turns <em>Available</em> → clock stops.<br />
+                Scan QR at <strong>exit gate</strong> to display elapsed time &amp; fare.
+              </div>
+            </div>
+
             <form onSubmit={handlePerformEntrySubmit} className="space-y-4 text-xs">
-              
+
               {/* Area & Slot selection */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1244,16 +1406,24 @@ export const AdminDashboard: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1 flex items-center gap-1">
-                    <CarFront className="h-3.5 w-3.5 text-primary" /> Vehicle Plate No
+                    <CarFront className="h-3.5 w-3.5 text-primary" /> Vehicle Plate No *
                   </label>
                   <input
                     type="text"
-                    required
                     placeholder="KA-03-MM-1234"
                     value={entryVehicleNo}
                     onChange={(e) => setEntryVehicleNo(e.target.value.toUpperCase())}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold text-slate-800 dark:text-slate-200"
+                    className={`w-full p-2.5 rounded-xl border bg-white dark:bg-slate-900 font-bold text-slate-800 dark:text-slate-200 ${
+                      !entryVehicleNo.trim()
+                        ? 'border-amber-400 dark:border-amber-600'
+                        : 'border-slate-200 dark:border-slate-800'
+                    }`}
                   />
+                  {!entryVehicleNo.trim() && (
+                    <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5 font-semibold">
+                      Required — enter the vehicle plate number
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -1305,10 +1475,10 @@ export const AdminDashboard: React.FC = () => {
                 </div>
               </div>
 
-              {/* Entry Timestamp input */}
+              {/* Gate Authorisation timestamp (NOT the billing clock start) */}
               <div>
                 <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1 flex items-center gap-1">
-                  <Clock className="h-3.5 w-3.5 text-primary" /> Entry Timestamp (Automated / Manual Override)
+                  <Clock className="h-3.5 w-3.5 text-primary" /> Gate Authorisation Time (for records)
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -1325,6 +1495,9 @@ export const AdminDashboard: React.FC = () => {
                     Now
                   </button>
                 </div>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Billing clock starts automatically when the slot sensor marks the bay Occupied.
+                </p>
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-slate-800">
@@ -1339,7 +1512,7 @@ export const AdminDashboard: React.FC = () => {
                   type="submit"
                   className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full text-xs font-bold cursor-pointer glow-emerald shadow"
                 >
-                  Check-In & Open Gate
+                  Authorise Entry &amp; Open Gate
                 </button>
               </div>
             </form>
@@ -1380,6 +1553,15 @@ export const AdminDashboard: React.FC = () => {
                   <p><strong>Driver:</strong> {exitTarget.ownerName}</p>
                   <p><strong>Model:</strong> {exitTarget.vehicleModel} ({exitTarget.vehicleType})</p>
                 </div>
+                {exitTarget.sensorClosed ? (
+                  <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold pt-2 border-t border-emerald-500/20">
+                    Clock stopped by the slot occupancy sensor when the vehicle left — the duration & fare below are sensor-measured.
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold pt-2 border-t border-amber-500/20">
+                    Vehicle still reported as parked — the clock will stop at the exit-gate timestamp below.
+                  </p>
+                )}
               </div>
 
               {/* Exit Timestamp input */}
@@ -1391,16 +1573,19 @@ export const AdminDashboard: React.FC = () => {
                   <input
                     type="datetime-local"
                     value={exitTimeInput}
+                    disabled={exitTarget.sensorClosed}
                     onChange={(e) => setExitTimeInput(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-semibold"
+                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-semibold disabled:opacity-70 disabled:cursor-not-allowed"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setExitTimeInput(new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16))}
-                    className="px-3 py-2 bg-slate-200 dark:bg-slate-800 rounded-xl text-[10px] font-bold shrink-0 cursor-pointer"
-                  >
-                    Now
-                  </button>
+                  {!exitTarget.sensorClosed && (
+                    <button
+                      type="button"
+                      onClick={() => setExitTimeInput(new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16))}
+                      className="px-3 py-2 bg-slate-200 dark:bg-slate-800 rounded-xl text-[10px] font-bold shrink-0 cursor-pointer"
+                    >
+                      Now
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1573,18 +1758,32 @@ export const AdminDashboard: React.FC = () => {
                           selectedSlotDetails.slot.id,
                           st.val as SlotStatus,
                           st.val === 'available' ? {
-                            vehicleNo: undefined,
-                            vehicleModel: undefined,
-                            vehicleType: undefined,
-                            ownerName: undefined,
-                            ownerPhone: undefined,
-                            occupancyTime: undefined
+                            vehicleNo: '',
+                            vehicleModel: '',
+                            vehicleType: '',
+                            ownerName: '',
+                            ownerPhone: '',
+                            occupancyTime: '',
+                            sessionSource: ''
                           } : st.val === 'occupied' ? {
-                            vehicleNo: 'KL-01-AA-9999',
-                            vehicleModel: 'Direct drive-in vehicle',
-                            vehicleType: 'Car',
-                            ownerName: 'Walk-in customer',
-                            occupancyTime: new Date().toISOString()
+                            // Manual override = physical truth ("a car IS sitting
+                            // here"), never a new gate session. Keep whatever
+                            // identity the slot carries so the occupancy watcher
+                            // can start the real clock from it; 'sensor' marks it
+                            // as hardware-confirmed so the demo simulator treats
+                            // it as untouchable.
+                            vehicleNo: selectedSlotDetails.slot.vehicleNo || 'UNKNOWN',
+                            vehicleModel: selectedSlotDetails.slot.vehicleModel || 'Standard Vehicle',
+                            vehicleType: selectedSlotDetails.slot.vehicleType || 'Car',
+                            ownerName: selectedSlotDetails.slot.ownerName || 'Walk-in customer',
+                            ownerPhone: selectedSlotDetails.slot.ownerPhone || 'N/A',
+                            occupancyTime: selectedSlotDetails.slot.occupancyTime && !selectedSlotDetails.slot.occupancyTime.includes('Gate authorised')
+                              ? selectedSlotDetails.slot.occupancyTime
+                              : new Date().toISOString(),
+                            // NOT 'gate': a manual occupied stamp is a physical
+                            // arrival report, so the simulator + gate flow both
+                            // leave it alone.
+                            sessionSource: 'sensor'
                           } : {}
                         );
                         setSelectedSlotDetails(null);
