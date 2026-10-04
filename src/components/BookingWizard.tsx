@@ -67,25 +67,30 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
     for (let h = 0; h < 24; h++) {
       for (let m = 0; m < 60; m += 30) {
         const val = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        let isDisabled = false;
+        
         if (isToday) {
           const [mh, mn] = minTimeToday.split(':').map(Number);
           if (h < mh || (h === mh && m < mn)) {
-            continue;
+            isDisabled = true;
           }
         }
-        options.push(val);
+        
+        options.push({ value: val, disabled: isDisabled });
       }
     }
-    // Ensure the current bookingTime is in the list (if they picked a custom non-30min time before)
-    if (bookingTime && !options.includes(bookingTime)) {
+    
+    // Ensure the current bookingTime is in the list (e.g. if it's a non-30min default time)
+    if (bookingTime && !options.find(o => o.value === bookingTime)) {
+      let isDisabled = false;
       if (isToday) {
         const [bh, bm] = bookingTime.split(':').map(Number);
         const [mh, mn] = minTimeToday.split(':').map(Number);
-        if (!(bh < mh || (bh === mh && bm < mn))) options.unshift(bookingTime);
-      } else {
-        options.unshift(bookingTime);
+        if (bh < mh || (bh === mh && bm < mn)) isDisabled = true;
       }
+      options.unshift({ value: bookingTime, disabled: isDisabled });
     }
+    
     return options;
   };
   const timeOptions = generateTimeOptions();
@@ -429,7 +434,9 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                       }`}
                     >
                       {timeOptions.map(t => (
-                        <option key={t} value={t}>{t}</option>
+                        <option key={t.value} value={t.value} disabled={t.disabled}>
+                          {t.value} {t.disabled ? '(Unavailable)' : ''}
+                        </option>
                       ))}
                     </select>
                     {isPast && (
