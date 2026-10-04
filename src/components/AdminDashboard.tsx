@@ -727,17 +727,17 @@ export const AdminDashboard: React.FC = () => {
               return (
                 <div
                   key={slot.id}
-                  className={`p-4 border rounded-2xl text-left transition-all duration-200 hover:shadow bg-white dark:bg-slate-900 ${styleBorder} flex flex-col justify-between`}
+                  className={`p-4 border rounded-2xl text-left transition-all duration-200 hover:shadow bg-white dark:bg-slate-900 ${styleBorder} flex flex-col justify-between overflow-hidden min-w-0`}
                 >
-                  <div onClick={() => setSelectedSlotDetails({ area: activeArea, slot })} className="cursor-pointer space-y-1">
+                  <div onClick={() => setSelectedSlotDetails({ area: activeArea, slot })} className="cursor-pointer space-y-1 overflow-hidden min-w-0">
                     <div className="flex justify-between items-center mb-1">
-                      <span className="font-extrabold text-sm">{slot.id}</span>
-                      <div className={`h-2.5 w-2.5 rounded-full ${badgeColor}`} />
+                      <span className="font-extrabold text-sm truncate pr-2">{slot.id}</span>
+                      <div className={`h-2.5 w-2.5 rounded-full shrink-0 ${badgeColor}`} />
                     </div>
                     
-                    <div className="space-y-0.5 text-[10px]">
-                      <p className={`font-bold capitalize ${textColor}`}>{slot.status}</p>
-                      <p className="text-slate-400 font-semibold">{slot.vehicleNo || 'Empty spot'}</p>
+                    <div className="space-y-0.5 text-[10px] min-w-0">
+                      <p className={`font-bold capitalize truncate ${textColor}`}>{slot.status}</p>
+                      <p className="text-slate-400 font-semibold truncate">{slot.vehicleNo || 'Empty spot'}</p>
                       <p className="text-slate-400 truncate">{slot.occupancyTime || 'No duration logs'}</p>
                     </div>
                   </div>
