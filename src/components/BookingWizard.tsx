@@ -209,7 +209,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
           setPaymentLoading(false);
         }
       },
-      handler: async function (response: any) {
+      handler: async function () {
         // Payment successful callback
         try {
           const ticket = await reserveSlot({
