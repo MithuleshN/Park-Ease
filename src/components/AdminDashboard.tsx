@@ -437,31 +437,19 @@ export const AdminDashboard: React.FC = () => {
 
     const q = val.trim().toLowerCase();
     
-    // Check if matches an active booking
-    const matchedBk = bookings.find(
-      (b) => b.status === 'Confirmed' && (
-        b.bookingId.toLowerCase().includes(q) ||
-        b.vehicleNo.toLowerCase().includes(q) ||
-        b.reservationId.toLowerCase().includes(q)
+    // 1. Vehicle already vacated → bill from the sensor-closed session
+    const billable = parkingLogs.find(
+      (l) => l.status === 'OUT_COMPLETED' && !l.billed && (
+        l.vehicleNo.toLowerCase().includes(q) ||
+        (l.bookingId && l.bookingId.toLowerCase().includes(q))
       )
     );
-
-    if (matchedBk) {
-      openScanInForSlot(matchedBk.area, {
-        id: matchedBk.slotId,
-        status: 'reserved',
-        vehicleNo: matchedBk.vehicleNo,
-        vehicleModel: matchedBk.vehicleModel,
-        vehicleType: matchedBk.vehicleType,
-        ownerName: matchedBk.name,
-        ownerPhone: matchedBk.phone,
-        occupancyTime: `Reserved for ${matchedBk.time}`,
-        sensorStatus: 'Inactive'
-      });
+    if (billable) {
+      openScanOutForLog(billable);
       return;
     }
 
-    // Check if matches an occupied slot
+    // 2. Check if matches an occupied slot
     let foundSlot: Slot | null = null;
     let foundArea = activeArea;
 
@@ -484,12 +472,28 @@ export const AdminDashboard: React.FC = () => {
       return;
     }
 
-    // Vehicle already vacated → bill from the sensor-closed session
-    const billable = parkingLogs.find(
-      (l) => l.status === 'OUT_COMPLETED' && !l.billed && l.vehicleNo.toLowerCase().includes(q)
+    // 3. Check if matches an active booking (Gate IN)
+    const matchedBk = bookings.find(
+      (b) => b.status === 'Confirmed' && (
+        b.bookingId.toLowerCase().includes(q) ||
+        b.vehicleNo.toLowerCase().includes(q) ||
+        b.reservationId.toLowerCase().includes(q)
+      )
     );
-    if (billable) {
-      openScanOutForLog(billable);
+
+    if (matchedBk) {
+      openScanInForSlot(matchedBk.area, {
+        id: matchedBk.slotId,
+        status: 'reserved',
+        vehicleNo: matchedBk.vehicleNo,
+        vehicleModel: matchedBk.vehicleModel,
+        vehicleType: matchedBk.vehicleType,
+        ownerName: matchedBk.name,
+        ownerPhone: matchedBk.phone,
+        occupancyTime: `Reserved for ${matchedBk.time}`,
+        sensorStatus: 'Inactive'
+      });
+      return;
     }
   };
 
