@@ -521,29 +521,31 @@ export const ParkingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     // Round up to the nearest minute, minimum 1 minute
     const durationMinutes = Math.max(1, Math.ceil(diffMs / (1000 * 60)));
 
-    // Billing: charge per started hour, minimum 1 hour
+    const rate = overrideHourlyRate ?? settings.hourlyRate;
+    const firstHourRate = settings.depositFee;
+
+    let baseFare = 0;
+    if (durationMinutes <= 60) {
+      baseFare = firstHourRate;
+    } else if (durationMinutes <= 480) { // Up to 8 hours
+      const extraMinutes = durationMinutes - 60;
+      const extra30MinBlocks = Math.ceil(extraMinutes / 30);
+      baseFare = firstHourRate + (extra30MinBlocks * rate);
+    } else { // Past 8 hours
+      const first8HoursFare = firstHourRate + (14 * rate);
+      const extraMinutes = durationMinutes - 480;
+      const extra30MinBlocks = Math.ceil(extraMinutes / 30);
+      baseFare = first8HoursFare + (extra30MinBlocks * 100);
+    }
+
+    // Billing: charge per started hour, minimum 1 hour (for display/reporting purposes)
     const chargedHours = Math.max(1, Math.ceil(durationMinutes / 60));
 
-    // Vehicle type multipliers
-    const multipliers: Record<string, number> = {
-      Bike: 0.5,
-      Car: 1.0,
-      EV: 1.0,
-      SUV: 1.25,
-    };
-    const vehicleMultiplier = multipliers[vehicleType] ?? 1.0;
+    // Vehicle type multipliers and peak surcharge are kept 1 and 0 as the new logic overrides them
+    const vehicleMultiplier = 1.0;
 
-    const rate = overrideHourlyRate ?? settings.hourlyRate;
-    const baseFare = Math.round(chargedHours * rate * vehicleMultiplier);
-
-    // Peak surcharge check (based on ENTRY time — when car arrived at the slot)
-    const entryHH = String(entry.getHours()).padStart(2, '0');
-    const entryMM = String(entry.getMinutes()).padStart(2, '0');
-    const entryTimeFormatted = `${entryHH}:${entryMM}`;
-    const peak = isPeakHour(entryTimeFormatted);
-    const peakSurcharge = peak ? Math.round(baseFare * 0.2) : 0; // 20% surcharge during peak
-
-    const totalFare = baseFare + peakSurcharge;
+    const totalFare = baseFare;
+    // Compensation of the 50 deposit is done here by subtracting it
     const amountDue = Math.max(0, totalFare - depositPaid);
 
     const hrs = Math.floor(durationMinutes / 60);
@@ -558,8 +560,8 @@ export const ParkingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       vehicleType,
       vehicleMultiplier,
       baseFare,
-      isPeak: peak,
-      peakSurcharge,
+      isPeak: false,
+      peakSurcharge: 0,
       totalFare,
       depositPaid,
       amountDue,
@@ -983,6 +985,47 @@ export const ParkingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slots, loading, logsLoaded]);
+
+  // ── Auto-cancel expired reservations ────────────────────────────────────────
+  useEffect(() => {
+    if (loading) return;
+
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const expiryMs = settings.reservationExpiry * 60 * 1000;
+      
+      const currentBookings = bookingsRef.current;
+      const currentSlots = slotsRef.current;
+
+      currentBookings.forEach((booking) => {
+        if (booking.status !== 'Confirmed') return;
+
+        // Parse booking time
+        const [hh, mm] = booking.time.split(':').map(Number);
+        const bookingDate = new Date(booking.date);
+        bookingDate.setHours(hh, mm, 0, 0);
+
+        // Calculate if elapsed time exceeds expiry
+        if (now - bookingDate.getTime() > expiryMs) {
+          // Check if slot is still marked as reserved
+          const areaName = booking.area;
+          const slot = currentSlots[areaName]?.find((s) => s.id === booking.slotId);
+
+          if (
+            slot &&
+            slot.status === 'reserved' &&
+            slot.vehicleNo?.toUpperCase() === booking.vehicleNo.toUpperCase()
+          ) {
+            console.log(`Auto-cancelling expired reservation ${booking.bookingId} for slot ${booking.slotId}`);
+            cancelReservation(booking.bookingId);
+          }
+        }
+      });
+    }, 60000); // Check every minute
+
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, settings.reservationExpiry]);
 
   return (
     <ParkingContext.Provider

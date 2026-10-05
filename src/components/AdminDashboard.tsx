@@ -663,7 +663,7 @@ export const AdminDashboard: React.FC = () => {
               {totalCompletedLogs} Exits Billed
             </span>
           </div>
-          <p className="text-[11px] text-slate-400 mt-2">Hourly base rate: ₹{settings.hourlyRate}/hr</p>
+          <p className="text-[11px] text-slate-400 mt-2">Block extension rate: ₹{settings.hourlyRate}/30m</p>
         </div>
 
         {/* Metric 4 */}
@@ -1447,10 +1447,10 @@ export const AdminDashboard: React.FC = () => {
                     onChange={(e) => setEntryVehicleType(e.target.value)}
                     className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
                   >
-                    <option value="Car">Car (1.0x)</option>
-                    <option value="SUV">SUV (1.25x)</option>
-                    <option value="EV">EV (1.0x)</option>
-                    <option value="Bike">Bike (0.5x)</option>
+                    <option value="Car">Car</option>
+                    <option value="SUV">SUV</option>
+                    <option value="EV">EV</option>
+                    <option value="Bike">Bike</option>
                   </select>
                 </div>
 
@@ -1601,15 +1601,8 @@ export const AdminDashboard: React.FC = () => {
 
                   <div className="space-y-2 text-xs text-slate-700 dark:text-slate-300">
                     <div className="flex justify-between">
-                      <span>Base Rate ({liveFarePreview.chargedHours} hrs @ ₹{liveFarePreview.hourlyRate}/hr × {liveFarePreview.vehicleMultiplier}x):</span>
+                      <span>Total Base Fare (Block-based):</span>
                       <span className="font-bold">₹{liveFarePreview.baseFare}</span>
-                    </div>
-
-                    <div className="flex justify-between">
-                      <span>Peak Hours Surcharge ({liveFarePreview.isPeak ? '20% Active' : 'Off-Peak 0%'}):</span>
-                      <span className={`font-bold ${liveFarePreview.isPeak ? 'text-amber-500' : 'text-slate-400'}`}>
-                        +₹{liveFarePreview.peakSurcharge}
-                      </span>
                     </div>
 
                     <div className="flex justify-between">
@@ -1696,7 +1689,6 @@ export const AdminDashboard: React.FC = () => {
                 <div className="flex justify-between"><span>Exit Time:</span> <span className="font-semibold">{completedReceipt.exitTime ? new Date(completedReceipt.exitTime).toLocaleTimeString() : '--'}</span></div>
                 <div className="flex justify-between"><span>Total Duration:</span> <span className="font-bold text-amber-500">{completedReceipt.durationMinutes ? `${Math.floor(completedReceipt.durationMinutes / 60)}h ${completedReceipt.durationMinutes % 60}m` : '--'}</span></div>
                 <div className="flex justify-between"><span>Base Rate:</span> <span>₹{completedReceipt.baseFare || 0}</span></div>
-                <div className="flex justify-between"><span>Peak Surcharge:</span> <span>₹{completedReceipt.peakSurcharge || 0}</span></div>
                 <div className="flex justify-between"><span>Pre-paid Deposit:</span> <span>-₹{completedReceipt.depositPaid || 0}</span></div>
                 <div className="border-t pt-2 flex justify-between font-black text-sm">
                   <span>Net Amount Paid:</span>

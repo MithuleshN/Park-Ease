@@ -204,6 +204,20 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
       theme: {
         color: '#10b981' // emerald-500 matching the UI
       },
+      config: {
+        display: {
+          blocks: {
+            upi: {
+              name: 'Pay using UPI / QR Code',
+              instruments: [{ method: 'upi' }]
+            }
+          },
+          sequence: ['block.upi'],
+          preferences: {
+            show_default_blocks: true
+          }
+        }
+      },
       modal: {
         ondismiss: function() {
           setPaymentLoading(false);
@@ -516,7 +530,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                   <div className={`p-4 rounded-2xl flex items-start gap-3 border text-left ${
                     isPeak
                       ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-800 dark:text-emerald-450 dark:bg-emerald-950/20'
-                      : 'bg-rose-500/10 border-rose-500/20 text-rose-800 dark:text-rose-450 dark:bg-rose-950/20'
+                      : 'bg-sky-500/10 border-sky-500/20 text-sky-800 dark:text-sky-400 dark:bg-sky-950/20'
                   }`}>
                     {isPeak ? (
                       <>
@@ -530,11 +544,11 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                       </>
                     ) : (
                       <>
-                        <AlertCircle className="h-5 w-5 text-rose-500 shrink-0 mt-0.5" />
+                        <AlertCircle className="h-5 w-5 text-sky-500 shrink-0 mt-0.5" />
                         <div>
-                          <h4 className="text-sm font-bold">Reservation Unavailable</h4>
+                          <h4 className="text-sm font-bold">Open Parking Available</h4>
                           <p className="text-xs opacity-80 mt-0.5">
-                            Peak Reserve is closed. Free off-peak hours offer direct drive-in parking without deposit. Please pick a time between {settings.peakHoursStart} and {settings.peakHoursEnd}.
+                            This time is not under peak parking timing. You don't need a reservation—you may use the open parking! To make a guaranteed reservation, please pick a peak time between {settings.peakHoursStart} and {settings.peakHoursEnd}.
                           </p>
                         </div>
                       </>
