@@ -88,6 +88,7 @@ export const AdminDashboard: React.FC = () => {
     logId?: string;
     /** True when the IoT sensor already stopped the clock (slot went available). */
     sensorClosed?: boolean;
+    sensorFare?: FareDetails;
   } | null>(null);
   const [exitTimeInput, setExitTimeInput] = useState(
     new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
@@ -109,6 +110,10 @@ export const AdminDashboard: React.FC = () => {
   // Recalculate live fare when exitTarget or exitTimeInput changes
   useEffect(() => {
     if (exitTarget) {
+      if (exitTarget.sensorClosed && exitTarget.sensorFare) {
+        setLiveFarePreview(exitTarget.sensorFare);
+        return;
+      }
       const exitIso = new Date(exitTimeInput).toISOString();
       const fare = calculateFareDetails(
         exitTarget.entryTime,
@@ -243,6 +248,20 @@ export const AdminDashboard: React.FC = () => {
       depositPaid: log.depositPaid || 0,
       logId: log.logId,
       sensorClosed: log.status === 'OUT_COMPLETED',
+      sensorFare: log.status === 'OUT_COMPLETED' ? {
+        durationMinutes: log.durationMinutes || 0,
+        durationFormatted: log.durationMinutes ? `${Math.floor(log.durationMinutes / 60)}h ${log.durationMinutes % 60}m` : '0m',
+        chargedHours: 0,
+        hourlyRate: log.hourlyRate || settings.hourlyRate,
+        vehicleType: log.vehicleType || 'Car',
+        vehicleMultiplier: 1,
+        baseFare: log.baseFare || 0,
+        isPeak: false,
+        peakSurcharge: log.peakSurcharge || 0,
+        totalFare: log.totalFare || 0,
+        depositPaid: log.depositPaid || 0,
+        amountDue: log.amountDue || 0,
+      } : undefined
     });
 
     const base = log.exitTime ? new Date(log.exitTime) : new Date();
