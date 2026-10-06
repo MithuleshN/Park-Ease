@@ -86,6 +86,7 @@ export const AdminDashboard: React.FC = () => {
     entryTime: string;
     depositPaid: number;
     logId?: string;
+    hourlyRate?: number;
     /** True when the IoT sensor already stopped the clock (slot went available). */
     sensorClosed?: boolean;
     sensorFare?: FareDetails;
@@ -118,7 +119,7 @@ export const AdminDashboard: React.FC = () => {
       const fare = calculateFareDetails(
         exitTarget.entryTime,
         exitIso,
-        settings.hourlyRate,
+        exitTarget.hourlyRate || settings.hourlyRate,
         exitTarget.vehicleType || 'Car',
         exitTarget.depositPaid || 0,
         exitTarget.area
@@ -226,6 +227,7 @@ export const AdminDashboard: React.FC = () => {
       entryTime: entryIso,
       depositPaid,
       logId: activeLog?.logId,
+      hourlyRate: activeLog?.hourlyRate || settings.hourlyRate,
     });
 
     setExitTimeInput(new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16));
@@ -247,6 +249,7 @@ export const AdminDashboard: React.FC = () => {
       entryTime: log.entryTime,
       depositPaid: log.depositPaid || 0,
       logId: log.logId,
+      hourlyRate: log.hourlyRate || settings.hourlyRate,
       sensorClosed: log.status === 'OUT_COMPLETED',
       sensorFare: log.status === 'OUT_COMPLETED' ? {
         durationMinutes: log.durationMinutes || 0,

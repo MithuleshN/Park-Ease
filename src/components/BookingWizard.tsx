@@ -1004,6 +1004,12 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ onClose }) => {
                     <div><span className="text-slate-400 block font-semibold">Deposit status:</span> <span className="font-black text-emerald-500">₹{confirmedBooking.deposit} paid</span></div>
                   </div>
 
+                  {/* Cancellation Policy & Contact */}
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-slate-800 text-[10px] text-slate-500 dark:text-slate-400 text-left mb-4 space-y-1">
+                    <p><strong>Cancellation Policy:</strong> Free cancellation up to 10 hours prior to the reservation. Late cancellations will forfeit the deposit.</p>
+                    <p><strong>Support Contact:</strong> support@parkease.com</p>
+                  </div>
+
                   {/* Ticket bottom code */}
                   <div className="flex justify-between items-center text-[10px] text-slate-400 font-bold uppercase">
                     <span>ID: {confirmedBooking.bookingId}</span>
